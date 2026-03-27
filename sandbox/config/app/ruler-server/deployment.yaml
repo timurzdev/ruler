@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ruler-server-config
+  namespace: ruler-system
+data:
+  GRPC_PORT: "8080"
+  SQLITE_PATH: "/data/ruler.db"
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ruler-server-data
+  namespace: ruler-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ruler-server
+  namespace: ruler-system
+  labels:
+    app: ruler-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ruler-server
+  template:
+    metadata:
+      labels:
+        app: ruler-server
+    spec:
+      containers:
+        - name: server
+          image: ruler-server:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: grpc
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ruler-server-config
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            grpc:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            grpc:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ruler-server-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ruler-server
+  namespace: ruler-system
+  labels:
+    app: ruler-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: grpc
+  selector:
+    app: ruler-server

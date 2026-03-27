@@ -1,0 +1,23 @@
+server:
+  persistentVolume:
+    enabled: true
+    size: 10Gi
+    storageClass: "standard"
+
+  extraArgs:
+    envflag.enable: "true"
+    httpListenAddr: ":8428"
+    retentionPeriod: "30d"
+    storageDataPath: "/storage"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+service:
+  type: ClusterIP
+  port: 8428

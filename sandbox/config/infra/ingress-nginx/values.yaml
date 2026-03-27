@@ -1,0 +1,7 @@
+controller:
+  nodeSelector:
+    ingress-ready: "true"
+  admissionWebhooks:
+    enabled: false
+  service:
+    type: NodePort

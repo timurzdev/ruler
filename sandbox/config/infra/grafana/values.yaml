@@ -1,0 +1,55 @@
+admin:
+  passwordKey: admin-password
+  userKey: admin-user
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# Enable ingress for grafana.local
+ingress:
+  enabled: true
+  hosts:
+    - grafana.local
+  paths:
+    - /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+# Pre-configure VictoriaMetrics datasource
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: VictoriaMetrics
+        type: prometheus
+        access: proxy
+        url: http://victoria-metrics-victoria-metrics-single-server.monitoring.svc.cluster.local:8428
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: "5s"
+          httpMethod: POST
+          manageAlerts: true
+          prometheusType: Prometheus
+          prometheusVersion: "2.40.0"
+          cacheLevel: 'High'
+          incrementalQuerying: true
+          incrementalQueryOverlapWindow: 10m
+
+# Install useful plugins
+plugins:
+  - grafana-clock-panel
+  - grafana-piechart-panel
+
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -1,0 +1,201 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - /tmp/task --list
+
+  cluster:create:
+    desc: Create kind cluster with ingress and storage
+    cmds:
+      - mkdir -p /tmp/victoriametrics-data
+      - kind create cluster --config=sandbox/kind-config.yaml --name=ruler
+      - |
+        echo "========================================"
+        echo "Cluster created! Add to /etc/hosts:"
+        echo "127.0.0.1 grafana.local"
+        echo "========================================"
+
+  cluster:delete:
+    desc: Delete kind cluster
+    cmds:
+      - kind delete cluster --name=ruler
+
+  cluster:reset:
+    desc: Full reset - delete and recreate cluster
+    cmds:
+      - task: cluster:delete
+      - task: cluster:create
+
+  infra:all:
+    desc: Deploy all infrastructure (cluster + components)
+    cmds:
+      - task: cluster:create
+      - task: helm:repos
+      - task: infra:deploy
+
+  helm:repos:
+    desc: Add and update Helm repositories
+    cmds:
+      - helm repo add vm https://victoriametrics.github.io/helm-charts/ 2>/dev/null || true
+      - helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
+      - helm repo add grafana-community https://grafana-community.github.io/helm-charts 2>/dev/null || true
+      - helm repo update
+
+  infra:deploy:
+    desc: Deploy all infrastructure components
+    cmds:
+      - task: infra:ingress
+      - task: infra:victoria-metrics
+      - task: infra:grafana
+      - task: infra:otel-collector
+      - task: infra:vm-operator
+      - |
+        echo "========================================"
+        echo "Infrastructure deployed!"
+        echo "Grafana: http://grafana.local:8080"
+        echo "========================================"
+
+  infra:ingress:
+    desc: Deploy ingress-nginx controller
+    cmds:
+      - |
+        helm upgrade --install ingress-nginx ingress-nginx \
+          --repo https://kubernetes.github.io/ingress-nginx \
+          --namespace ingress-nginx \
+          --create-namespace \
+          --values=sandbox/config/infra/ingress-nginx/values.yaml \
+          --wait
+
+  infra:victoria-metrics:
+    desc: Deploy VictoriaMetrics with persistent storage
+    cmds:
+      - |
+        helm upgrade --install victoria-metrics vm/victoria-metrics-single \
+          --namespace monitoring \
+          --create-namespace \
+          --values=sandbox/config/infra/victoria-metrics/values.yaml \
+          --wait
+
+  infra:grafana:
+    desc: Deploy Grafana with VictoriaMetrics datasource
+    cmds:
+      - |
+        helm upgrade --install grafana grafana-community/grafana \
+          --namespace monitoring \
+          --create-namespace \
+          --values=sandbox/config/infra/grafana/values.yaml \
+          --wait
+      - echo "Grafana admin password:"
+      - kubectl get secret --namespace monitoring grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+
+  infra:otel-collector:
+    desc: Deploy OpenTelemetry Collector
+    cmds:
+      - |
+        helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+          --namespace monitoring \
+          --create-namespace \
+          --values=sandbox/config/infra/otel-collector/values.yaml \
+          --wait
+
+  infra:vm-operator:
+    desc: Deploy VictoriaMetrics Operator for VMRule CRDs
+    cmds:
+      - |
+        helm upgrade --install vm-operator vm/victoria-metrics-operator \
+          --namespace monitoring \
+          --create-namespace \
+          --wait
+
+  infra:delete:
+    desc: Delete all infrastructure
+    cmds:
+      - helm uninstall grafana --namespace monitoring 2>/dev/null || true
+      - helm uninstall victoria-metrics --namespace monitoring 2>/dev/null || true
+      - helm uninstall otel-collector --namespace monitoring 2>/dev/null || true
+      - helm uninstall vm-operator --namespace monitoring 2>/dev/null || true
+      - helm uninstall ingress-nginx --namespace ingress-nginx 2>/dev/null || true
+
+  hosts:setup:
+    desc: Setup local hosts entry for grafana.local
+    cmds:
+      - echo "Add this line to /etc/hosts:"
+      - echo "127.0.0.1 grafana.local"
+
+  app:load-images:
+    desc: Load local docker images into kind
+    cmds:
+      - bash sandbox/scripts/load-images.sh
+
+  app:deploy:
+    desc: Deploy ruler-server and ruler-controller
+    cmds:
+      - kubectl apply -f sandbox/config/app/namespace.yaml
+      - kubectl apply -f sandbox/config/app/ruler-server/
+      - kubectl apply -f sandbox/config/app/ruler-controller/
+      - echo "Application deployed to ruler-system namespace"
+
+  app:delete:
+    desc: Delete ruler-server and ruler-controller
+    cmds:
+      - kubectl delete namespace ruler-system --ignore-not-found=true
+
+  app:logs:
+    desc: Show logs from ruler components
+    cmds:
+      - kubectl logs -n ruler-system -l app=ruler-server --tail=100 2>/dev/null || echo "ruler-server not running"
+      - kubectl logs -n ruler-system -l app=ruler-controller --tail=100 2>/dev/null || echo "ruler-controller not running"
+
+  demo:deploy:
+    desc: Deploy OpenTelemetry Demo for metrics generation
+    cmds:
+      - |
+        helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+          --namespace otel-demo \
+          --create-namespace \
+          --set opentelemetry-collector.enabled=false \
+          --set jaeger.enabled=false \
+          --set grafana.enabled=false \
+          --set prometheus.enabled=false \
+          --wait
+
+  demo:delete:
+    desc: Delete OpenTelemetry Demo
+    cmds:
+      - helm uninstall otel-demo --namespace otel-demo 2>/dev/null || true
+
+  reset:
+    desc: Full reset - cluster + infra + demo
+    cmds:
+      - task: cluster:reset
+      - task: infra:deploy
+      - task: demo:deploy
+
+  status:
+    desc: Show cluster status
+    cmds:
+      - echo "=== Namespaces ==="
+      - kubectl get namespaces
+      - echo ""
+      - echo "=== Pods (monitoring) ==="
+      - kubectl get pods -n monitoring 2>/dev/null || echo "monitoring namespace not found"
+      - echo ""
+      - echo "=== Pods (ruler-system) ==="
+      - kubectl get pods -n ruler-system 2>/dev/null || echo "ruler-system namespace not found"
+      - echo ""
+      - echo "=== Services ==="
+      - kubectl get svc -n monitoring 2>/dev/null || echo "No services found"
+      - echo ""
+      - echo "=== Ingresses ==="
+      - kubectl get ingress -A 2>/dev/null || echo "No ingresses found"
+
+  test:connectivity:
+    desc: Test connectivity to all services
+    cmds:
+      - echo "Testing VictoriaMetrics..."
+      - kubectl exec -n monitoring deploy/victoria-metrics -- wget -qO- http://localhost:8428/health || echo "VictoriaMetrics health check failed"
+      - echo ""
+      - echo "Testing Grafana..."
+      - kubectl exec -n monitoring deploy/grafana -- wget -qO- http://localhost:3000/api/health 2>/dev/null || echo "Grafana health check failed"

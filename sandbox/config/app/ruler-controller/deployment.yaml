@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ruler-controller-config
+  namespace: ruler-system
+data:
+  API_SERVER_URL: "ruler-server.ruler-system.svc.cluster.local:8080"
+  LOG_LEVEL: "info"
+  SYNC_INTERVAL: "30s"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ruler-controller
+  namespace: ruler-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ruler-controller
+rules:
+  - apiGroups: ["operator.victoriametrics.com"]
+    resources: ["vmrules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["operator.victoriametrics.com"]
+    resources: ["vmrules/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ruler-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ruler-controller
+subjects:
+  - kind: ServiceAccount
+    name: ruler-controller
+    namespace: ruler-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ruler-controller
+  namespace: ruler-system
+  labels:
+    app: ruler-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ruler-controller
+  template:
+    metadata:
+      labels:
+        app: ruler-controller
+    spec:
+      serviceAccountName: ruler-controller
+      containers:
+        - name: controller
+          image: ruler-controller:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: ruler-controller-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
